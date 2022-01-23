@@ -10,17 +10,8 @@ namespace BullyBot
         /// <summary>
         /// Classes which are available via Dependancy Injection in Commands
         /// </summary>
-        internal static readonly IServiceProvider InjectionClasses;
-        
-        /// <summary>
-        /// Initialise Dependancy Injection
-        /// </summary>
-        static Program()
-        {
-            var Collection = new ServiceCollection();
-            InjectionClasses = Collection.BuildServiceProvider();
-        }
-        
+        internal static IServiceProvider InjectionClasses { get; private set; }
+
         /// <summary>
         /// Application Entry Point
         /// </summary>
@@ -35,6 +26,11 @@ namespace BullyBot
                 Console.WriteLine("If the configuration file cannot be discovered automatically, you can specify it manually with the --config command line parameter");
                 Environment.Exit(2);
             }
+            
+            // Add classes for Dependancy Injection
+            var Collection = new ServiceCollection();
+            Collection.AddSingleton(ApplicationConfigFile);
+            InjectionClasses = Collection.BuildServiceProvider();
             
             // Initialise the main thread by handing control to the bot class
             try
