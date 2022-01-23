@@ -36,6 +36,35 @@ public static class UserConfig
     }
     
     /// <summary>
+    /// Retrieve all Usernames in the configuration
+    /// </summary>
+    /// <param name="AppConfig">Instance of the AppConfig</param>
+	/// <param name="User">Username to look for</param>
+    /// <returns>Snowflake Id</returns>
+    public static string GetConfigUserSnowflake(IConfiguration AppConfig, string User)
+    {
+		var ReturnUsers = new List<string>();
+	    try
+	    {
+		    var ModuleConfig = AppConfig.GetSection("BullyBot:BullyUsers").Get<IConfigurationSection[]>();
+			foreach( var Section in ModuleConfig )
+			{
+				if( Section == null ) continue;
+				if( User.ToLower() == Section.GetValue<string>("Name").ToLower() )
+				{
+					return Section.GetValue<string>("SnowflakeId");
+				}
+			}
+	    }
+	    catch( Exception Ex )
+	    {
+		    Log.Error(Ex, "Error retrieving config users");
+	    }
+	    
+	    return null;
+    }
+    
+    /// <summary>
     /// Retrieve Module section for a user
     /// </summary>
     /// <param name="AppConfig">Instance of the AppConfig</param>

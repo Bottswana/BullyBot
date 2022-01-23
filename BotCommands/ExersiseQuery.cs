@@ -1,5 +1,6 @@
 using System;
 using Serilog;
+using Discord;
 using Discord.Commands;
 using BullyBot.Classes;
 using System.Threading.Tasks;
@@ -20,6 +21,7 @@ namespace BullyBot.BotCommands
 		}
 		#endregion Initialisation
 		
+		#region Commands
 	    /// <summary>
 	    /// Check the exercise the targetted user has performed today
 	    /// </summary>
@@ -27,10 +29,20 @@ namespace BullyBot.BotCommands
 		[Summary("Check what exercise the user has done today")]
 		public async Task CheckExercise([Summary("The user to target")] string User)
 		{
-			// Check we have a valid user string
+			// Setup response object
+		    var CommandResponse = new EmbedBuilder
+	        {
+				Description = $"Here is the latest exercise data I have for <@!{UserConfig.GetConfigUserSnowflake(_Configuration, User)}>",
+				Title = "Check Exercise Data",
+				Color = Color.Green
+	        };
+
+		    // Check we have a valid user string
 			if( string.IsNullOrEmpty(User) )
 			{
-				await Context.Channel.SendMessageAsync($"Please specify a user for this command");
+				CommandResponse.WithColor(Color.Blue);
+				CommandResponse.AddField("Command Error", "Please specify a user with this command");
+				await ReplyAsync(embed: CommandResponse.Build());
 				return;
 			}
 
@@ -44,14 +56,34 @@ namespace BullyBot.BotCommands
 				{
 					try
 					{
-						var exerciseData = await TargetModule.DownloadData();
-						await Context.Channel.SendMessageAsync(JsonConvert.SerializeObject(exerciseData));
+						// Fetch the current data for this user using the DataSource in the configuration
+						var ExerciseData = await TargetModule.DownloadData();
+						
+						// Format the response to the user
+						CommandResponse.AddField("Exercise Minutes", ExerciseData.activeMinutes != null ? $"{ExerciseData.activeMinutes} minutes today" : "No Data Yet");
+						CommandResponse.AddField("Resting Heartrate", ExerciseData.restingHeartRate != null ? $"{ExerciseData.restingHeartRate} bpm" : "No Data Yet");
+						CommandResponse.AddField("Step Count", ExerciseData.numberSteps != null ? $"{ExerciseData.numberSteps} steps" : "No Data Yet");
+						
+						// Format date from Unix Timestamp
+						var DataTime = Epoch.FromUnix(ExerciseData.uploadDate);
+						if( DataTime != null)
+						{
+							var TimeFormat = DataTime?.ToString("MM/dd/yyyy HH:mm:ss");
+							CommandResponse.WithFooter(footer => footer.Text = $"Data retrieved @ {TimeFormat}");
+						}
+						
+						// Respond to the command
+						await ReplyAsync(embed: CommandResponse.Build());
 						return;
 					}
 					catch( Exception Ex )
 					{
+						// Error executing instance
 						Log.Error(Ex, "Error retrieving exercise data");
-						await Context.Channel.SendMessageAsync($"Sorry, I had a problem retrieving that data: {Ex.Message}");
+						CommandResponse.AddField("Execution Error", "Sorry, I couldn't execute this command");
+						CommandResponse.AddField("Error Message", Ex.Message);
+						CommandResponse.WithColor(Color.Red);
+						await ReplyAsync(embed: CommandResponse.Build());
 						return;
 					}
 				}
@@ -59,14 +91,20 @@ namespace BullyBot.BotCommands
 				{
 					// Cant create instance
 					Log.Error("Unable to create an instance with name {DataSource}", DataSource);
-					await Context.Channel.SendMessageAsync($"Sorry, I had a problem creating an instance with name {DataSource}");
+					CommandResponse.AddField("Execution Error", "Sorry, I couldn't execute this command");
+					CommandResponse.AddField("Error Message", $"No such class with name {DataSource}");
+					CommandResponse.WithColor(Color.Red);
+					await ReplyAsync(embed: CommandResponse.Build());
 					return;
 				}
 			}
 
 			// Unable to find the user
-			await Context.Channel.SendMessageAsync($"User not found or exercise module not active for user: {User}");
+			CommandResponse.WithColor(Color.Blue);
+			CommandResponse.AddField("Command Error", "User not found or `exersise` isn't active for this user");
+			await ReplyAsync(embed: CommandResponse.Build());
 		}
+		#endregion Commands
 		
 		#region Private Methods
 		/// <summary>
