@@ -22,6 +22,49 @@ namespace BullyBot.BotCommands
 		#endregion Initialisation
 		
 		#region Commands
+		[Command]
+		[Summary("Help Command")]
+		public async Task Help()
+		{
+			// Setup response object
+		    var CommandResponse = new EmbedBuilder
+	        {
+				Description = $"This module encourages good exercise!",
+				Title = "Exercise Module",
+				Color = Color.Green
+	        };
+	        
+	        // Setup available commands
+	        CommandResponse.AddField("exercise list", "List users that have this module enabled");
+	        CommandResponse.AddField("exercise check username", "Check what exercise listed users have performed today");
+	        await ReplyAsync(embed: CommandResponse.Build());
+		}
+		
+	    /// <summary>
+	    /// Check the exercise the targetted user has performed today
+	    /// </summary>
+	    [Command("list")]
+		[Summary("Check what users have this module enabled")]
+		public async Task ListUsers()
+		{
+			// Setup response object
+		    var CommandResponse = new EmbedBuilder
+	        {
+				Description = $"These are the users enabled for this module",
+				Title = "Exercise Module Users",
+				Color = Color.Green
+	        };
+		    
+	        var Users = UserConfig.GetConfigUsers(_Configuration);
+	        foreach( var ThisUser in Users )
+	        {
+		        CommandResponse.AddField($"Username: {ThisUser}", $"Discord Tag: <@!{UserConfig.GetConfigUserSnowflake(_Configuration, ThisUser)}>");
+	        }
+	        
+			// Return user list
+			await ReplyAsync(embed: CommandResponse.Build());
+		}
+		
 	    /// <summary>
 	    /// Check the exercise the targetted user has performed today
 	    /// </summary>
