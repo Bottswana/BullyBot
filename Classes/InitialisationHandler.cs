@@ -14,14 +14,17 @@ namespace BullyBot.Classes
     public static class InitialisationHandler
     {
         /// <summary>
+        /// Configuration file that was loaded
+        /// </summary>
+        public static string LoadedConfiguration { get; private set; }
+        
+        /// <summary>
         /// Find the configuration file for the executable
         /// </summary>
         /// <param name="Arguments">Arguments parsed during launch</param>
         /// <returns>iConfigurationBuilder if valid, or null if not found</returns>
         public static IConfiguration LoadConfiguration(IEnumerable<string> Arguments)
         {
-            string ApplicationConfigFile = null;
-            
             // Configuration File Command Argument
             var ArgumentSearch = Arguments.FirstOrDefault(q => q.Contains("--config=", StringComparison.CurrentCultureIgnoreCase));
             if( !string.IsNullOrEmpty(ArgumentSearch) )
@@ -30,20 +33,20 @@ namespace BullyBot.Classes
                 if( ConfigurationFile.EndsWith(".json") && File.Exists(ConfigurationFile) )
                 {
                     Console.WriteLine($"Configuration file loaded from path: '{ConfigurationFile}");
-                    ApplicationConfigFile = ConfigurationFile;
+                    LoadedConfiguration = ConfigurationFile;
                 }
             }
             
             // Configuration File Discovery
             var ExecutablePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)?.Replace("file:\\", "").Replace("file:", "");
-            if( ApplicationConfigFile == null && ExecutablePath != null )
+            if( LoadedConfiguration == null && ExecutablePath != null )
             {
                 // First check the parent directory for a global configuration file
                 var GlobalAppConfig = Path.Combine(Directory.GetParent(ExecutablePath)?.FullName ?? "", "appsettings.json");
                 if( File.Exists(GlobalAppConfig) )
                 {
                     Console.WriteLine($"Configuration file loaded from path: '{GlobalAppConfig}");
-                    ApplicationConfigFile = GlobalAppConfig;
+                    LoadedConfiguration = GlobalAppConfig;
                 }
                 
                 // Finally check the current directory (standard asp.net core implementation)
@@ -51,14 +54,14 @@ namespace BullyBot.Classes
                 if( File.Exists(ProjectAppConfig) )
                 {
                     Console.WriteLine($"Configuration file loaded from path: '{ProjectAppConfig}");
-                    ApplicationConfigFile = ProjectAppConfig;
+                    LoadedConfiguration = ProjectAppConfig;
                 }
             }
             
             // Return the configuration file path
-            if( ApplicationConfigFile == null ) return null;
-            return new ConfigurationBuilder().AddJsonFile(ApplicationConfigFile, false, true)
-            .AddJsonFile(ApplicationConfigFile.Replace(".json", ".development.json"), true, true).Build();
+            if( LoadedConfiguration == null ) return null;
+            return new ConfigurationBuilder().AddJsonFile(LoadedConfiguration, false, true)
+            .AddJsonFile(LoadedConfiguration.Replace(".json", ".development.json"), true, true).Build();
         }
         
         /// <summary>

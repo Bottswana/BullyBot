@@ -58,17 +58,25 @@ namespace BullyBot.BotCommands
 					{
 						// Fetch the current data for this user using the DataSource in the configuration
 						var ExerciseData = await TargetModule.DownloadData();
+						if( ExerciseData == null )
+						{
+							CommandResponse.AddField("Execution Error", "Sorry, I couldn't execute this command");
+							CommandResponse.AddField("Error Message", "No data was returned by DataSource");
+							CommandResponse.WithColor(Color.Red);
+							await ReplyAsync(embed: CommandResponse.Build());
+							return;
+						}
 						
 						// Format the response to the user
-						CommandResponse.AddField("Exercise Minutes", ExerciseData.activeMinutes != null ? $"{ExerciseData.activeMinutes} minutes today" : "No Data Yet");
-						CommandResponse.AddField("Resting Heartrate", ExerciseData.restingHeartRate != null ? $"{ExerciseData.restingHeartRate} bpm" : "No Data Yet");
-						CommandResponse.AddField("Step Count", ExerciseData.numberSteps != null ? $"{ExerciseData.numberSteps} steps" : "No Data Yet");
+						CommandResponse.AddField("Exercise Minutes", ExerciseData.activeMinutes != null ? $"{Math.Floor(ExerciseData.activeMinutes.Value)} minutes today" : "No Data Yet");
+						CommandResponse.AddField("Resting Heartrate", ExerciseData.restingHeartRate != null ? $"{Math.Floor(ExerciseData.restingHeartRate.Value)} bpm" : "No Data Yet");
+						CommandResponse.AddField("Step Count", ExerciseData.numberSteps != null ? $"{Math.Floor(ExerciseData.numberSteps.Value)} steps" : "No Data Yet");
 						
 						// Format date from Unix Timestamp
 						var DataTime = Epoch.FromUnix(ExerciseData.uploadDate);
 						if( DataTime != null)
 						{
-							var TimeFormat = DataTime?.ToString("MM/dd/yyyy HH:mm:ss");
+							var TimeFormat = DataTime?.ToString("dd/MM/yyyy HH:mm:ss");
 							CommandResponse.WithFooter(footer => footer.Text = $"Data retrieved @ {TimeFormat}");
 						}
 						
