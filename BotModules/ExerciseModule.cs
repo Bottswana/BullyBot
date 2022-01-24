@@ -3,24 +3,129 @@ using Serilog;
 using Discord;
 using Discord.Commands;
 using BullyBot.Classes;
+using Discord.WebSocket;
 using System.Threading.Tasks;
 using BullyBot.ExerciseDataSources;
 using Microsoft.Extensions.Configuration;
 
-namespace BullyBot.BotCommands
+namespace BullyBot.BotModules
 {
 	[Group("exercise")]
-    public class ExerciseQuery : ModuleBase<SocketCommandContext>
+    public class ExerciseModule : ModuleBase<SocketCommandContext>
     {
 		private readonly IConfiguration _Configuration;
+		private readonly DiscordSocketClient _Client;
 		
 		#region Initialisation
-		public ExerciseQuery(IConfiguration appConfig)
+		public ExerciseModule(IConfiguration appConfig, DiscordSocketClient client)
 		{
+			Program.OnNotificationTime += _OnNotificationTime;
 			_Configuration = appConfig;
+			_Client = client;
 		}
 		#endregion Initialisation
 		
+		#region Scheduled Timer
+		private async void _OnNotificationTime()
+		{
+			// Get users and notification channel
+			var ChannelSnowflake = _Configuration.GetValue<ulong>("BullyBot:NotificationChannelSnowflake");
+	        var Users = UserConfig.GetConfigUsers(_Configuration);
+	        if( ChannelSnowflake <= 0 )
+	        {
+		        Log.Error("Invalid notification SnowflakeId in config");
+		        return;
+	        }
+	        
+	        // Iterate over active users
+	        Log.Debug("Running scheduled timer for ExerciseModule");
+	        foreach( var ThisUser in Users )
+	        {
+				Log.Debug("Checking {User} against their goal", ThisUser);
+				try
+				{
+					// Find the user configuration and download the data
+					var (DataSource, ModuleConfig) = UserConfig.GetModule(_Configuration, ThisUser, "exercise") ?? (null, null);
+					if( string.IsNullOrEmpty(DataSource) ) continue; // Not enabled for this user
+
+					var TargetModule = _GetExerciseModule(DataSource, ModuleConfig);
+					if( TargetModule == null ) throw new Exception("Unable to create DataSource");
+					
+					var ExerciseData = await TargetModule.DownloadData();
+					if( ExerciseData == null ) throw new Exception("No data returned from DataSource");
+
+					// Decide if we need to send an alert to the channel
+					var UserAlert = ExerciseData.activeMinutes switch
+					{
+						< 30 and > 15 => new EmbedBuilder
+						{
+							Description = $"Hey <@!{UserConfig.GetConfigUserSnowflake(_Configuration, ThisUser)}>\nYou're nearly at the 30 minute goal, time to do a bit more exercise?",
+							Title = "Exercise Goal",
+							Color = Color.Orange
+						},
+						< 30 and > 0 => new EmbedBuilder
+						{
+							Description = $"Hey <@!{UserConfig.GetConfigUserSnowflake(_Configuration, ThisUser)}>\nYou've got a bit to go to meet the goal, time to go work out?",
+							Title = "Exercise Goal",
+							Color = Color.Red
+						},
+						0 => new EmbedBuilder
+						{
+							Description = $"Hey <@!{UserConfig.GetConfigUserSnowflake(_Configuration, ThisUser)}>\nDon't be a lazy bones! Time to go work out",
+							Title = "Exercise Goal",
+							Color = Color.Red
+						},
+						null => new EmbedBuilder
+						{
+							Description = $"Hey <@!{UserConfig.GetConfigUserSnowflake(_Configuration, ThisUser)}>\nDon't be a lazy bones! Time to go work out",
+							Title = "Exercise Goal",
+							Color = Color.Red
+						},
+						_ => null
+					};
+					
+					// Check data health
+					var StartOfToday = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, 0, 0, 0);
+					var TodayStart = Epoch.ToUnix(StartOfToday);
+					if( ExerciseData.uploadDate < TodayStart )
+					{
+						UserAlert = new EmbedBuilder
+						{
+							Description = $"Hey <@!{UserConfig.GetConfigUserSnowflake(_Configuration, ThisUser)}>\nYour data is out of date! Here's the last health data I have for you",
+							Title = "Exercise Goal",
+							Color = Color.Red
+						};
+					}
+
+					// If we decided to send an alert, populate base data and send
+					if( UserAlert != null )
+					{
+						// Populate users health data
+						UserAlert.AddField("Exercise Minutes", ExerciseData.activeMinutes != null ? $"{Math.Floor(ExerciseData.activeMinutes.Value)} minutes today" : "No Data Yet");
+						UserAlert.AddField("Resting Heartrate", ExerciseData.restingHeartRate != null ? $"{Math.Floor(ExerciseData.restingHeartRate.Value)} bpm" : "No Data Yet");
+						UserAlert.AddField("Step Count", ExerciseData.numberSteps != null ? $"{Math.Floor(ExerciseData.numberSteps.Value)} steps" : "No Data Yet");
+						
+						// Format date from Unix Timestamp
+						var DataTime = Epoch.FromUnix(ExerciseData.uploadDate);
+						if( DataTime != null)
+						{
+							var TimeFormat = DataTime?.ToString("dd/MM/yyyy HH:mm:ss");
+							UserAlert.WithFooter(footer => footer.Text = $"Data retrieved @ {TimeFormat}");
+						}
+					
+						// Send to the channel
+						var NotificationChannel = (IMessageChannel) await _Client.GetChannelAsync(ChannelSnowflake);
+						await NotificationChannel.SendMessageAsync(null, false, UserAlert.Build());
+					}
+				}
+				catch( Exception Ex )
+				{
+					Log.Error(Ex, "Error checking excersise for user {ThisUser}", ThisUser);
+				}
+	        }
+		}
+		#endregion
+
 		#region Commands
 		[Command]
 		[Summary("Help Command")]

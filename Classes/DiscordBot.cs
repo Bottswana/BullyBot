@@ -12,7 +12,7 @@ namespace BullyBot.Classes
 {
     public class DiscordBot
     {
-        private readonly DiscordSocketClient _DiscordClient;
+        internal readonly DiscordSocketClient _DiscordClient;
         private readonly CommandService _DiscordCommand;
         private readonly string _BotKey;
 
@@ -91,7 +91,7 @@ namespace BullyBot.Classes
 
         private Task DiscordOnLog(LogMessage arg)
         {
-            Log.Debug(arg.Message);
+            Log.Debug("D.Net: {Message}", arg.Message);
             return null;
         }
         #endregion Private Methods
