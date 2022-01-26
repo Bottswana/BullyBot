@@ -112,9 +112,16 @@ public class FitBitDownload : IExerciseDataSource
                     // Update configuration with refresh token
                     try
                     {
-                        var DevelopmentConfig = InitialisationHandler.LoadedConfiguration.Replace(".json", ".development.json");
                         await _UpdateConfig(InitialisationHandler.LoadedConfiguration, _RefreshToken, RefreshData.RefreshToken);
-                        await _UpdateConfig(DevelopmentConfig, _RefreshToken, RefreshData.RefreshToken);
+                        #if DEBUG
+                        try
+                        {
+                            // Ignore failures for development config
+                            var DevelopmentConfig = InitialisationHandler.LoadedConfiguration.Replace(".json", ".development.json");
+                            await _UpdateConfig(DevelopmentConfig, _RefreshToken, RefreshData.RefreshToken);
+                        }
+                        catch( Exception ) {}
+                        #endif
                     }
                     catch( Exception Ex )
                     {

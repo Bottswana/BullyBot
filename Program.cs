@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace BullyBot
 {
-    public delegate void OnNotifyTime();
+    public delegate void OnNotifyTime(int TriggerHour);
     
     internal class Program
     {
@@ -49,29 +49,20 @@ namespace BullyBot
                 
             InjectionClasses = Collection.BuildServiceProvider();
             
-            // Setup the notify timer
-            var NotifyTime = ApplicationConfigFile.GetSection("BullyBot:NotificationTime").Get<int[]>();
-            if( NotifyTime is not { Length: 2 } )
+            // Setup the once-per-hour timer (if notification is enabled
+            if( !string.IsNullOrEmpty(ApplicationConfigFile.GetValue<string>("BullyBot:NotificationChannelSnowflake")) )
             {
-                Log.Error("Invalid notification time in configuration. Notification feature not enabled");
-            }
-            else
-            {
-                var AlertTime = new TimeSpan(NotifyTime[0], NotifyTime[1], 0) - DateTime.Now.TimeOfDay;
-                if( AlertTime < TimeSpan.Zero )
+                // Get the time interval between now and the next hour
+                var TimeNow = DateTime.Now;
+                var AlertTime = new TimeSpan(TimeNow.Hour + 1, 0, 0) - TimeNow.TimeOfDay;
+                Log.Debug("Notification timer delay for next hour is {AlertTime}", AlertTime);
+
+                // It is currently before the scheduled time to run
+                var _ = new Timer(_ =>
                 {
-                    // It is currently after the timer window, schedule it for tomorrow
-                    Log.Debug("Timer window has already passed {AlertTime}", AlertTime);
-                }
-                else
-                {
-                    // It is currently before the scheduled time to run
-                    Log.Debug("Scheduling timer to fire in {AlertTime}", AlertTime);
-                    var _ = new Timer(_ => {
-                        Log.Debug("Firing event callback");
-                        OnNotificationTime?.Invoke();
-                    }, null, AlertTime, new TimeSpan(24, 0, 0));
-                }
+                    Log.Debug("Timer has reached on the hour - firing events");
+                    OnNotificationTime?.Invoke(DateTime.Now.Hour);
+                }, null, AlertTime, new TimeSpan(1, 0, 0));
             }
 
             // Initialise the main thread by handing control to the bot class

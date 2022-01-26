@@ -1,10 +1,16 @@
 using System;
 using Serilog;
 using Discord;
+using System.IO;
+using System.Linq;
+using BullyBot.Models;
+using Newtonsoft.Json;
 using Discord.Commands;
 using BullyBot.Classes;
 using Discord.WebSocket;
+using System.Reflection;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using BullyBot.ExerciseDataSources;
 using Microsoft.Extensions.Configuration;
 
@@ -13,20 +19,34 @@ namespace BullyBot.BotModules
 	[Group("exercise")]
     public class ExerciseModule : ModuleBase<SocketCommandContext>
     {
+		private static readonly List<(string ThisUser, int TriggerHour)> _Notifications = new();
+		private static readonly object _ThreadLock = new();
+		private static bool _HasRegisteredEvent = false;
 		private readonly IConfiguration _Configuration;
 		private readonly DiscordSocketClient _Client;
 		
 		#region Initialisation
 		public ExerciseModule(IConfiguration appConfig, DiscordSocketClient client)
 		{
-			Program.OnNotificationTime += _OnNotificationTime;
+			// Setup locals
 			_Configuration = appConfig;
 			_Client = client;
+
+			// Register the Notification callback
+			lock( _ThreadLock )
+			{
+				if( !_HasRegisteredEvent )
+				{
+					Program.OnNotificationTime += _OnNotificationTime;
+					Task.Run(_LoadNotifications);
+					_HasRegisteredEvent = true;
+				}
+			}
 		}
 		#endregion Initialisation
 		
 		#region Scheduled Timer
-		private async void _OnNotificationTime()
+		private async void _OnNotificationTime(int TriggerHour)
 		{
 			// Get users and notification channel
 			var ChannelSnowflake = _Configuration.GetValue<ulong>("BullyBot:NotificationChannelSnowflake");
@@ -47,7 +67,18 @@ namespace BullyBot.BotModules
 					// Find the user configuration and download the data
 					var (DataSource, ModuleConfig) = UserConfig.GetModule(_Configuration, ThisUser, "exercise") ?? (null, null);
 					if( string.IsNullOrEmpty(DataSource) ) continue; // Not enabled for this user
-
+					
+					// Check if we have a notifications set for this hour
+					lock( _ThreadLock )
+					{
+						if( !_Notifications.Any(q => q.ThisUser == ThisUser && q.TriggerHour == TriggerHour) )
+						{
+							Log.Debug("Skipping event on hour {Hour} for user {ThisUser} as not enabled", TriggerHour, ThisUser);
+							continue;
+						}
+					}
+					
+					// Get data for the user
 					var TargetModule = _GetExerciseModule(DataSource, ModuleConfig);
 					if( TargetModule == null ) throw new Exception("Unable to create DataSource");
 					
@@ -127,6 +158,9 @@ namespace BullyBot.BotModules
 		#endregion
 
 		#region Commands
+		/// <summary>
+		/// Default command that lists all available commands in this module
+		/// </summary>
 		[Command]
 		[Summary("Help Command")]
 		public async Task Help()
@@ -140,8 +174,10 @@ namespace BullyBot.BotModules
 	        };
 	        
 	        // Setup available commands
-	        CommandResponse.AddField("exercise list", "List users that have this module enabled");
+	        CommandResponse.AddField("exercise list", "List users that have this module enabled and the notifications that they have enabled");
 	        CommandResponse.AddField("exercise check username", "Check what exercise listed users have performed today");
+	        CommandResponse.AddField("exercise notify add <0-23>", "Add a exercise reminder to ping you at the specified hour");
+			CommandResponse.AddField("exercise notify remove <0-23>", "Remove a exercise reminder at the specified hour");
 	        await ReplyAsync(embed: CommandResponse.Build());
 		}
 		
@@ -160,11 +196,17 @@ namespace BullyBot.BotModules
 				Color = Color.Green
 	        };
 		    
-	        var Users = UserConfig.GetConfigUsers(_Configuration);
-	        foreach( var ThisUser in Users )
-	        {
-		        CommandResponse.AddField($"Username: {ThisUser}", $"Discord Tag: <@!{UserConfig.GetConfigUserSnowflake(_Configuration, ThisUser)}>");
-	        }
+		    lock( _ThreadLock )
+		    {
+		        var Users = UserConfig.GetConfigUsers(_Configuration);
+		        foreach( var ThisUser in Users )
+		        {
+			        var NotificationHours = _Notifications.Where(q => q.ThisUser == ThisUser).OrderBy(q => q.TriggerHour).Select(q => q.TriggerHour).ToArray();
+					var UserText = $"Discord Tag: <@!{UserConfig.GetConfigUserSnowflake(_Configuration, ThisUser)}>";
+					if( NotificationHours.Length > 0 ) UserText += $"; Notification Hours: {string.Join(',', NotificationHours)}";
+					CommandResponse.AddField($"Username: {ThisUser}", UserText);
+		        }
+			}
 	        
 			// Return user list
 			await ReplyAsync(embed: CommandResponse.Build());
@@ -260,6 +302,118 @@ namespace BullyBot.BotModules
 			CommandResponse.AddField("Command Error", "User not found or `exersise` isn't active for this user");
 			await ReplyAsync(embed: CommandResponse.Build());
 		}
+		
+		/// <summary>
+		/// Allow the user to set when they would like exercise notifications
+		/// </summary>
+		[Command("notify")]
+		[Summary("Add or remove a notification for exercise")]
+		public async Task SetReminders([Summary("Action to perform")] string action, [Summary("Hour to notify at")] int Hour)
+		{
+			// Setup response object
+		    var CommandResponse = new EmbedBuilder
+	        {
+		        Title = "Update Exercise Notifications",
+				Color = Color.Green
+	        };
+	        
+	        // Check for invalid hours
+	        if( Hour is < 0 or > 23 )
+	        {
+				CommandResponse.WithColor(Color.Blue);
+				CommandResponse.AddField("Command Error", $"Notification hour `{Hour}:00` is invalid");
+				await ReplyAsync(embed: CommandResponse.Build());
+				return;
+	        }
+		    
+		    // Find the user that sent the message
+		    try
+		    {
+				var User = UserConfig.FindUserBySnowflake(_Configuration, Context.User.Id);
+				if( !string.IsNullOrEmpty(User) )
+				{
+					// See if we can get a configuration for this user
+					var (DataSource, ModuleConfig) = UserConfig.GetModule(_Configuration, User, "exercise") ?? (null, null);
+					if( !string.IsNullOrEmpty(DataSource) )
+					{
+						switch(action.ToLower())
+						{
+							case "add":
+							{
+								// Add the item to the array
+								lock( _ThreadLock )
+								{
+									var ArrayWhere = _Notifications.Where(q => q.ThisUser == User && q.TriggerHour == Hour).ToArray();
+									if( ArrayWhere.Any() )
+									{
+										CommandResponse.WithColor(Color.Blue);
+										CommandResponse.AddField("Command Error", $"Notification already exists for `{Hour}:00`");
+									}
+									else
+									{
+										CommandResponse.WithColor(Color.Green);
+										CommandResponse.AddField("Notifcations Updated", $"Added notification for `{Hour}:00`");
+										_Notifications.Add((ThisUser: User, TriggerHour: Hour));
+									}
+								}
+								
+								// Notify user
+								await ReplyAsync(embed: CommandResponse.Build());
+								await _SaveNotifications();
+								return;
+							}
+							case "remove":
+							{
+								// Remove the item from the array
+								lock( _ThreadLock )
+								{
+									var ArrayWhere = _Notifications.Where(q => q.ThisUser == User && q.TriggerHour == Hour).ToArray();
+									if( !ArrayWhere.Any() )
+									{
+										CommandResponse.WithColor(Color.Blue);
+										CommandResponse.AddField("Command Error", $"Notification does not exist for `{Hour}:00`");
+									}
+									else
+									{
+										CommandResponse.WithColor(Color.Green);
+										CommandResponse.AddField("Notifcations Updated", $"Removed notification for `{Hour}:00`");
+										_Notifications.Remove(ArrayWhere.First());
+									}
+								}
+								
+								// Notify user
+								await ReplyAsync(embed: CommandResponse.Build());
+								await _SaveNotifications();
+								return;
+							}
+							default:
+							{
+								// Unknown command
+								CommandResponse.WithColor(Color.Blue);
+								CommandResponse.AddField("Command Error", $"Unknown command modifier `{action}`");
+								await ReplyAsync(embed: CommandResponse.Build());
+								return;
+							}
+						}
+					}
+				}
+		    }
+		    catch( Exception Ex )
+		    {
+				// Error executing command
+				Log.Error(Ex, "Error executing command");
+				CommandResponse.AddField("Execution Error", "Sorry, I couldn't execute this command");
+				CommandResponse.AddField("Error Message", Ex.Message);
+				CommandResponse.WithColor(Color.Red);
+				await ReplyAsync(embed: CommandResponse.Build());
+				return;
+		    }
+
+			// Unable to find the user
+			CommandResponse.WithColor(Color.Blue);
+			CommandResponse.AddField("Command Error", "User not found or `exersise` isn't active for this user");
+			await ReplyAsync(embed: CommandResponse.Build());	
+		}
 		#endregion Commands
 		
 		#region Private Methods
@@ -282,6 +436,86 @@ namespace BullyBot.BotModules
 			}
 			catch( Exception ) {}
 			return null;
+		}
+		
+		/// <summary>
+		/// Save the current notification configuration to a JSON file
+		/// </summary>
+		private static async Task _SaveNotifications()
+		{
+			// Build JOSN Data
+			var NotificationModels = new List<NotificationConfigModel>();
+			lock( _ThreadLock )
+			{
+				foreach( var (ThisUser, TriggerHour) in _Notifications )
+				{
+					var Matching = NotificationModels.Where(q => q.User == ThisUser ).ToArray();
+					if( Matching.Any() )
+					{
+						Matching.First().TriggerHours.Add(TriggerHour);
+					}
+					else
+					{
+						NotificationModels.Add(new NotificationConfigModel
+						{
+							TriggerHours = new List<int> { TriggerHour },
+							Module = "exercise",
+							User = ThisUser
+						});
+					}
+				}
+			}
+		
+			// Save to Notifications file
+            var ExecutablePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)?.Replace("file:\\", "").Replace("file:", "");
+            if( ExecutablePath != null )
+            {
+	            var NotifcationConfig = Path.Combine(ExecutablePath, "notifications.json");
+	            await File.WriteAllTextAsync(NotifcationConfig, JsonConvert.SerializeObject(NotificationModels));
+            }
+		}
+		
+		/// <summary>
+		/// Load the current notification configuration from a JSON file
+		/// </summary>
+		private static async Task _LoadNotifications()
+		{
+			// Load from Notifications file
+            var ExecutablePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)?.Replace("file:\\", "").Replace("file:", "");
+            if( ExecutablePath != null )
+            {
+				// Load data from file
+	            var NotifcationConfig = Path.Combine(ExecutablePath, "notifications.json");
+	            var FileData = await File.ReadAllTextAsync(NotifcationConfig);
+	            if( string.IsNullOrEmpty(FileData) )
+	            {
+		            throw new Exception("Invalid file data from notifications.json");
+	            }
+	            
+	            // Deserialize JSON
+	            var NotificationModels = JsonConvert.DeserializeObject<List<NotificationConfigModel>>(FileData);
+	            if( NotificationModels == null )
+	            {
+		            throw new Exception("Invalid file data from notifications.json");
+	            }
+	            
+	            // Update notification array
+	            lock( _ThreadLock )
+	            {
+		            foreach( var Model in NotificationModels )
+		            {
+						if( Model.TriggerHours.Count == 0 || Model.Module != "exercise" ) continue;
+			            foreach( var Hour in Model.TriggerHours )
+			            {
+							Log.Debug("Loaded notification hour {Hour} for user {User}", Hour, Model.User);
+				            _Notifications.Add((ThisUser: Model.User, TriggerHour: Hour));
+			            }
+		            }
+	            }
+            }
+            
+            // :(
+            throw new Exception("Invalid notifications file");
 		}
 		#endregion Private Methods
     }

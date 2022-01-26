@@ -36,14 +36,13 @@ public static class UserConfig
     }
     
     /// <summary>
-    /// Retrieve all Usernames in the configuration
+    /// Retrieve a users SnowflakeId From the name
     /// </summary>
     /// <param name="AppConfig">Instance of the AppConfig</param>
 	/// <param name="User">Username to look for</param>
     /// <returns>Snowflake Id</returns>
-    public static string GetConfigUserSnowflake(IConfiguration AppConfig, string User)
+    public static ulong? GetConfigUserSnowflake(IConfiguration AppConfig, string User)
     {
-		var ReturnUsers = new List<string>();
 	    try
 	    {
 		    var ModuleConfig = AppConfig.GetSection("BullyBot:BullyUsers").Get<IConfigurationSection[]>();
@@ -52,7 +51,7 @@ public static class UserConfig
 				if( Section == null ) continue;
 				if( User.ToLower() == Section.GetValue<string>("Name").ToLower() )
 				{
-					return Section.GetValue<string>("SnowflakeId");
+					return Section.GetValue<ulong>("SnowflakeId");
 				}
 			}
 	    }
@@ -62,6 +61,34 @@ public static class UserConfig
 	    }
 	    
 	    return null;
+    }
+    
+    /// <summary>
+    /// Retrieve a users name from their SnowflakeId
+    /// </summary>
+    /// <param name="AppConfig">Instance of the AppConfig</param>
+	/// <param name="Snowflake">SnowflakeId</param>
+    /// <returns>Name</returns>
+    public static string FindUserBySnowflake(IConfiguration AppConfig, ulong Snowflake)
+    {
+	    try
+	    {
+		    var ModuleConfig = AppConfig.GetSection("BullyBot:BullyUsers").Get<IConfigurationSection[]>();
+			foreach( var Section in ModuleConfig )
+			{
+				if( Section == null ) continue;
+				if( Snowflake == Section.GetValue<ulong>("SnowflakeId") )
+				{
+					return Section.GetValue<string>("Name");
+				}
+			}
+	    }
+	    catch( Exception Ex )
+	    {
+		    Log.Error(Ex, "Error retrieving config users");
+	    }
+	    
+	    return null; 
     }
     
     /// <summary>
@@ -128,4 +155,5 @@ public static class UserConfig
 	    
 		return null;
     }
+    
 }
