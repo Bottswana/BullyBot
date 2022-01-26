@@ -54,12 +54,21 @@ public class FitBitDownload : IExerciseDataSource
             var ActivityRequest = await RequestClient.GetStringAsync($"{BASE_URL}/1/user/-/activities/date/{RequestDateString}.json");
             if( !string.IsNullOrEmpty(ActivityRequest) )
             {
+                // Calculate minutes from each activity
+                long ActiveMinutes = 0;
                 var JsonData = JsonConvert.DeserializeObject<FitBitDataModel.ActivityData>(ActivityRequest);
+                foreach( var Activity in JsonData?.Activities ?? Array.Empty<FitBitDataModel.Activity>() )
+                {
+                    var NumberMinutes = (double)Activity.DurationMilliseconds / 60000;
+                    ActiveMinutes += (long)Math.Ceiling(NumberMinutes);
+                }
+                
+                // Return data
                 return new ExerciseDataModel
                 {
-                    activeMinutes = JsonData?.Summary?.ActiveMinutes,
                     restingHeartRate = JsonData?.Summary?.HeartRate,
                     numberSteps = JsonData?.Summary?.Steps,
+                    activeMinutes = ActiveMinutes,
                     uploadDate = Epoch.Now
                 };
             }

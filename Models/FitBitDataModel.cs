@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using Newtonsoft.Json;
 
 namespace BullyBot.Models;
@@ -23,8 +24,21 @@ public class FitBitDataModel
     /// </summary>
     public class ActivityData
     {
+        [JsonProperty("activities")]
+        public Activity[] Activities { get; set; } = Array.Empty<Activity>();
+        
         [JsonProperty("summary")]
         public SummaryData? Summary { get; set; }
+    }
+    
+    /// <summary>
+    /// Individual Recorded Activity Data
+    /// https://dev.fitbit.com/build/reference/web-api/activity/get-daily-activity-summary/
+    /// </summary>
+    public class Activity
+    {
+        [JsonProperty("duration")]
+        public long DurationMilliseconds { get; set; }
     }
     
     /// <summary>
